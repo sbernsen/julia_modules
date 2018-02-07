@@ -1,7 +1,7 @@
 module Preprocessing
 
 
-export sd, remove_redundancy, running_stat, runsd_normalize, background_removal, butt_design
+export read_steps, preprocessing_steps, sd, remove_redundancy, running_stat, runsd_normalize, background_removal, rms_norm, butt_design
 
 ##### -------------------------------------------------------------------- #####
 #                            PREPROCESSING_FUNCTIONS                           #
@@ -11,16 +11,77 @@ export sd, remove_redundancy, running_stat, runsd_normalize, background_removal,
 #
 # This contains simple preprocessing functions to filter, remove noise, 
 # normalize, etc.
+##### ------------------------------------------------------------------- #####
+
+using Indicators, RCall, DSP, CSV
+
+
+##### -------------------------------------------------------------------- #####
+#                               Object Definitions                             #
 ##### -------------------------------------------------------------------- #####
 
-using Indicators, RCall, DSP
+# Define the object returned in read_steps()
+struct preprocessing_steps
+    filter_type::String
+    fc::Array
+    fs::Float64
+    d_rxtx::Float64
+    rms_norm::Bool
+    stat_norm::Bool
+    kwindow::Int64
+    stat_type::String
+    rm_bgrnd::Bool
+end
+
+
+
+function read_steps()
+# Read the steps for preprocessing. The function looks for a file names 'preprocessing_steps.txt'
+#
+# 
+# -----------------------------------------------------------------------------#
+
+pre_steps = CSV.read("preprocessing_steps.txt", header = [], delim = ':')
+
+rms_norm = parse( Bool, strip( (pre_steps[ pre_steps[:,1] .== "rms_norm", 2])[1] ) )
+stat_norm = parse( Bool, strip( (pre_steps[ pre_steps[:,1] .== "stat_norm", 2])[1] ) )
+
+if stat_norm 
+    stat_type = strip( (pre_steps[ pre_steps[:,1] .== "stat_type", 2] )[1] )
+    kwindow = parse( Int, strip( (pre_steps[ pre_steps[:, 1].== "kwindow", 2])[1] ) )
+else 
+    kwindow = "NA" 
+    stat_type = "NA"
+end
+
+rm_bgrnd = parse( Bool, strip( (pre_steps[ pre_steps[:,1] .== "rm_bgrnd", 2])[1] ) )
+d_rxtx = float( strip( (pre_steps[ pre_steps[:,1] .== "d_rxtx", 2] )[1] ) )
+fs = float( strip( (pre_steps[ pre_steps[:,1] .== "fs", 2])[1] ) )
+filter_type = strip( (pre_steps[ pre_steps[:,1] .== "filter_type", 2])[1] )
+fc = strip( ( pre_steps[ pre_steps[:,1].== "corner", 2] )[1] )
+
+if filter_type == "bp"
+
+    fc = [ float( split(fc, '/' )[1] ), float( split(fc, '/' )[2]) ]./fs
+elseif filter_type == "none"
+    fc = 1.0
+else
+    fc = float(fc[1])/fs
+end
+
+return_obj = preprocessing_steps(filter_type, fc, fs, d_rxtx, rms_norm, stat_norm, kwindow, stat_type, rm_bgrnd)
+return return_obj
+
+end
+
+
 
 function sd(v)
 # sd computes the standard deviation of a set of numbers. The intrinsic function
 # std won't work. Most of the time I really like julia but not when trying to
 # compute the standard deviation or variance of an array of type any
 #
-# ---------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
 
 sd = sqrt( sum( (v - mean(v) ).^2 )/(k-1) )
 return sd
@@ -90,6 +151,18 @@ if stat_type == "mean"
     for i = (1+k2):(n-k2)
         run_stat[i] = mean( ts[(i-k2):(i+k2)] )
     end
+elseif stat_type == "abs_mean"
+    ts_abs = abs(ts)
+    for i = 1:k2
+        run_stat[i] = mean( ts_abs[1:(i+k2)] )
+    end
+    for i = (n-k2+1):n
+        run_stat[i] = mean( ts_abs[(i-k2):n] )
+    end
+    # compute for the full window length
+    for i = (1+k2):(n-k2)
+        run_stat[i] = mean( ts_abs[(i-k2):(i+k2)] )
+    end
 else
     for i = 1:k2
         run_stat[i] = std( ts[1:(i+k2)] )
@@ -103,33 +176,14 @@ else
     end
 end
 
-return run_stat
+ts_norm = ts./run_stat
+
+return ts_norm
 
 
 end
 
 
-function runsd_normalize(ts, k)
-# runsd_normalize normalizes a timeseries by the standard deviation
-#
-# Input Variables:
-#   ts - the m-by-1 timeseries to be normalized
-#   k - the window length
-#   PLOT - logical value to show/suppress plot; default is true (plot)
-#
-# Output Variables
-#   ts_norm - the normalized timeseries
-#
-# ---------------------------------------------------------------------------- #
-
-# get the running standard deviation of the
-rmn, rsd = running_stat(ts, k, "std")
-ts_norm = ts./rsd
-
-return(ts_norm)
-
-
-end
 
 function background_removal(data_array)
 # background_removal computes a mean stack to estimate the background noise or
@@ -168,6 +222,27 @@ return data_array, data_avg
 end
 
 
+
+function rms_norm(ts)
+# Compute the cross correlation in the frequency domain of each column
+#
+# Input Variables:
+#
+# Output Variables:
+#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+n = length(ts)
+rms = sqrt( (1/n)*(ts'*ts) )
+
+ts = ts./rms
+
+return ts
+
+end
+
+
+
 ##### -------------------------------------------------------------------- #####
 #                              FILTERING_FUNCTIONS                             #
 #
@@ -176,7 +251,7 @@ end
 ##### -------------------------------------------------------------------- #####
 
 
-function butt_design( ts, filter_type )
+function butt_design( filter_type, fc )
 # lowpass_butter applies a low pass, 2 pole butterworth filter to a time series.
 # The filter is designed to a normalized sampling frequency of 1 and can be
 # scaled afterword. For example, the cutoff frequency of 20 MHz for a
@@ -205,49 +280,15 @@ end
 designmethod = Butterworth(2)
 filter_object = digitalfilter(responsetype, designmethod)
 
+return filter_object
 
 end
 
-
-##### -------------------------------------------------------------------- #####
-#                              FILTERING_FUNCTIONS                             #
-#
-# Created by Steven Bernsen because the wheel still isn't good enough
-# University of Maine
-##### -------------------------------------------------------------------- #####
-
-function butt_design( ts, filter_type )
-# lowpass_butter applies a low pass, 2 pole butterworth filter to a time series.
-# The filter is designed to a normalized sampling frequency of 1 and can be
-# scaled afterword. For example, the cutoff frequency of 20 MHz for a
-# timeseries sampled at 250 MHz would be fc = 20/250 = 0.08
-#
-# Input Variables:
-#   ts - the input timeseries
-#   fc - the corner frequency or frequencies. For bandpass filtering, input as
-#       [hp_corner, lp_corner]
-#   type - specified as "hp", "lp", "bp" for highpass, lowpass and bandpass,
-#       respectively
-#
-# Output Variables:
-#
-#
-##### -------------------------------------------------------------------- #####
-
-if filter_type == "bp"
-    responsetype = Bandpass( fc[1], fc[2] )
-elseif filter_type == "lp"
-    responsetype = Lowpass(fc)
-else
-    responsetype = Highpass(fc)
-end
-
-designmethod = Butterworth(2)
-filter_object = digitalfilter(responsetype, designmethod)
-
-
-end
 
 
 ### Thats it, son!
 end
+
+
+
+\

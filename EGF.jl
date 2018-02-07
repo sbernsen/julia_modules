@@ -124,26 +124,6 @@ function array_xcorr_td(ts1, ts2)
 end
 
 
-
-function rms_norm(ts)
-# Compute the cross correlation in the frequency domain of each column
-#
-# Input Variables:
-#
-# Output Variables:
-#
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-n = length(ts)
-rms = sqrt( (1/n)*(ts'*ts) )
-
-ts = ts./rms
-
-return ts
-
-end
-
-
 ################################################################################
 ################################# IO Functions #################################
 ################################################################################

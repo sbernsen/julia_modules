@@ -1,7 +1,9 @@
 
 
 
-module
+module radarIO
+
+export gps_xmlread, h5co, h5cmp
 
 
 using HDF5, DataFrames
@@ -109,7 +111,8 @@ function h5co(h5filename, line_number)
   gps_root = file_root*"_gps"
   gps_name = "GPS Cluster- MetaData_xml"
   gps_header = ["no_sat", "time_stamp", "quality", "gps_fix", "gps_msg", "lat", "lon", "ele"]
-  
+  gps_mat = []
+
   # Open the hdf5 file
   fid = h5open(h5filename)
   
@@ -126,7 +129,6 @@ function h5co(h5filename, line_number)
     trace_mat = zeros(M, N)
     
     
-    gps_mat = []
     for j = 1:N
     
         attr_name = line_number*"/"*location_id[j]*"/datacapture_0/echogram_0"
@@ -144,14 +146,12 @@ function h5co(h5filename, line_number)
 end
 
 
-
-
-
 function h5cmp(h5filename)
 # Each line consists of a set of time series for an antenna location that needs to be stacked. This is 
 
   gps_header = ["no_sat", "time_stamp", "quality", "gps_fix", "gps_msg", "lat", "lon", "ele"]
-  
+  gps_name = "GPS Cluster- MetaData_xml"
+
   fid = h5open(h5filename)
   line_id = names(fid)
   
@@ -161,10 +161,13 @@ function h5cmp(h5filename)
   n = length(line_id) 
   trace_mat = zeros(M, n)
   lle = zeros(n, 3 )
-  
+  keep_cols = []
   for i in 1:n
     
     if !isempty( fid[line_id[i] ] ) 
+
+        keep_cols = push!(keep_cols, i) 
+
         location_id = names(fid[line_id[i]])
         m = length(location_id)
         gps_mat = []
@@ -177,23 +180,27 @@ function h5cmp(h5filename)
                 gps_mat = push!(gps_mat, gps_xmlread( read(trace_h5[gps_name]) ) )
         end
         
-        
         gps_mat = DataFrame(gps_mat)
-        
+         
         #Check rows 4 and 5 to see if data points are valid
         gps_mat = gps_mat[:, find( convert(Array, gps_mat[4,:]) .!= "0") ]
         gps_mat = gps_mat[:, find( convert(Array, gps_mat[5,:]) .!= "0") ]
-        
+
         lle[i,:] = mapslices( mean, float(convert( Array, gps_mat[6:8,:] ) ), 2) 
-        
+
+                
         trace_mat[:,i] = trace_mat[:,i]./m
         
     end
   
   end
   
-  return trace_mat, gps_mat
+  trace_mat = trace_mat[:,keep_cols] 
+  lle = lle[keep_cols,:]
+
+  return trace_mat, lle
 end
 
 
 end
+
