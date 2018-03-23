@@ -1,0 +1,1 @@
+@everywhere push!(LOAD_PATH,"/home/bernsen/.julia/user_modules/")
