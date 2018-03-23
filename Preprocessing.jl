@@ -1,7 +1,9 @@
+
 module Preprocessing
 
 
-export read_steps, preprocessing_steps, sd, remove_redundancy, running_stat, runsd_normalize, background_removal, rms_norm, butt_design
+export sd, remove_redundancy, running_stat, runsd_normalize, background_removal, 
+        rms_norm, butt_design, time_adjust, decimate, whiten, trace_stack
 
 ##### -------------------------------------------------------------------- #####
 #                            PREPROCESSING_FUNCTIONS                           #
@@ -16,63 +18,6 @@ export read_steps, preprocessing_steps, sd, remove_redundancy, running_stat, run
 using Indicators, RCall, DSP, CSV
 
 
-##### -------------------------------------------------------------------- #####
-#                               Object Definitions                             #
-##### -------------------------------------------------------------------- #####
-
-# Define the object returned in read_steps()
-struct preprocessing_steps
-    filter_type::String
-    fc::Array
-    fs::Float64
-    d_rxtx::Float64
-    rms_norm::Bool
-    stat_norm::Bool
-    kwindow::Int64
-    stat_type::String
-    rm_bgrnd::Bool
-end
-
-
-
-function read_steps()
-# Read the steps for preprocessing. The function looks for a file names 'preprocessing_steps.txt'
-#
-# 
-# -----------------------------------------------------------------------------#
-
-pre_steps = CSV.read("preprocessing_steps.txt", header = [], delim = ':')
-
-rms_norm = parse( Bool, strip( (pre_steps[ pre_steps[:,1] .== "rms_norm", 2])[1] ) )
-stat_norm = parse( Bool, strip( (pre_steps[ pre_steps[:,1] .== "stat_norm", 2])[1] ) )
-
-if stat_norm 
-    stat_type = strip( (pre_steps[ pre_steps[:,1] .== "stat_type", 2] )[1] )
-    kwindow = parse( Int, strip( (pre_steps[ pre_steps[:, 1].== "kwindow", 2])[1] ) )
-else 
-    kwindow = "NA" 
-    stat_type = "NA"
-end
-
-rm_bgrnd = parse( Bool, strip( (pre_steps[ pre_steps[:,1] .== "rm_bgrnd", 2])[1] ) )
-d_rxtx = float( strip( (pre_steps[ pre_steps[:,1] .== "d_rxtx", 2] )[1] ) )
-fs = float( strip( (pre_steps[ pre_steps[:,1] .== "fs", 2])[1] ) )
-filter_type = strip( (pre_steps[ pre_steps[:,1] .== "filter_type", 2])[1] )
-fc = strip( ( pre_steps[ pre_steps[:,1].== "corner", 2] )[1] )
-
-if filter_type == "bp"
-
-    fc = [ float( split(fc, '/' )[1] ), float( split(fc, '/' )[2]) ]./fs
-elseif filter_type == "none"
-    fc = 1.0
-else
-    fc = float(fc[1])/fs
-end
-
-return_obj = preprocessing_steps(filter_type, fc, fs, d_rxtx, rms_norm, stat_norm, kwindow, stat_type, rm_bgrnd)
-return return_obj
-
-end
 
 
 
@@ -83,9 +28,8 @@ function sd(v)
 #
 # --------------------------------------------------------------------------- #
 
-sd = sqrt( sum( (v - mean(v) ).^2 )/(k-1) )
-return sd
-
+    sd = sqrt( sum( (v - mean(v) ).^2 )/(k-1) )
+    re
 end
 
 
@@ -127,59 +71,58 @@ function running_stat(ts, k, stat_type)
 #
 # ---------------------------------------------------------------------------- #
 
-# Allocate space
-n = length(ts)
-run_stat = zeros(n,1 )
+  # Allocate space
+  n = length(ts)
+  run_stat = zeros(n,1 )
 
-# the window length must be odd
-if iseven(k)
-    k2 = Int( k/2 )
-    k = Int( k + 1 )
-else
-    k2 = Int( floor(k/2) )
-end
+  # the window length must be odd
+  if iseven(k)
+      k2 = Int( k/2 )
+      k = Int( k + 1 )
+  else
+      k2 = Int( floor(k/2) )
+  end
 
-# Compute the running mean and standard deviation at the ends
-if stat_type == "mean"
-    for i = 1:k2
-        run_stat[i] = mean( ts[1:(i+k2)] )
-    end
-    for i = (n-k2+1):n
-        run_stat[i] = mean( ts[(i-k2):n] )
-    end
-    # compute for the full window length
-    for i = (1+k2):(n-k2)
-        run_stat[i] = mean( ts[(i-k2):(i+k2)] )
-    end
-elseif stat_type == "abs_mean"
-    ts_abs = abs(ts)
-    for i = 1:k2
-        run_stat[i] = mean( ts_abs[1:(i+k2)] )
-    end
-    for i = (n-k2+1):n
-        run_stat[i] = mean( ts_abs[(i-k2):n] )
-    end
-    # compute for the full window length
-    for i = (1+k2):(n-k2)
-        run_stat[i] = mean( ts_abs[(i-k2):(i+k2)] )
-    end
-else
-    for i = 1:k2
-        run_stat[i] = std( ts[1:(i+k2)] )
-    end
-    for i = (n-k2+1):n
-        run_stat[i] = std( ts[(i-k2):n] )
-    end
-    # compute for the full window length
-    for i = (1+k2):(n-k2)
-        run_stat[i] = std( ts[(i-k2):(i+k2)] )
-    end
-end
+  # Compute the running mean and standard deviation at the ends
+  if stat_type == "mean"
+      for i = 1:k2
+          run_stat[i] = mean( ts[1:(i+k2)] )
+      end
+      for i = (n-k2+1):n
+          run_stat[i] = mean( ts[(i-k2):n] )
+      end
+      # compute for the full window length
+      for i = (1+k2):(n-k2)
+          run_stat[i] = mean( ts[(i-k2):(i+k2)] )
+      end
+  elseif stat_type == "abs_mean"
+      ts_abs = abs.(ts)
+      for i = 1:k2
+          run_stat[i] = mean( ts_abs[1:(i+k2)] )
+      end
+      for i = (n-k2+1):n
+          run_stat[i] = mean( ts_abs[(i-k2):n] )
+      end
+      # compute for the full window length
+      for i = (1+k2):(n-k2)
+          run_stat[i] = mean( ts_abs[(i-k2):(i+k2)] )
+      end
+  else
+      for i = 1:k2
+          run_stat[i] = std( ts[1:(i+k2)] )
+      end
+      for i = (n-k2+1):n
+          run_stat[i] = std( ts[(i-k2):n] )
+      end
+      # compute for the full window length
+      for i = (1+k2):(n-k2)
+          run_stat[i] = std( ts[(i-k2):(i+k2)] )
+      end
+  end
 
-ts_norm = ts./run_stat
+  ts_norm = ts./run_stat
 
-return ts_norm
-
+  return ts_norm
 
 end
 
@@ -197,27 +140,27 @@ function background_removal(data_array)
 #
 # ---------------------------------------------------------------------------- #
 
-## lets get the mean values
-n = size(data_array,2)
+  ## lets get the mean values
+  n = size(data_array,2)
 
-# first let's scale each timeseries
-#for i = 1:n
-#    data_array[:,i] = ( data_array[:,i] - mean(data_array[:,i]) )./std(data_array[:,i] )
-#end
+  # first let's scale each timeseries
+  #for i = 1:n
+  #    data_array[:,i] = ( data_array[:,i] - mean(data_array[:,i]) )./std(data_array[:,i] )
+  #end
 
-# sum all of the timeseries, there isn't a function that supports data frames
-data_avg = data_array[:,1]
-for i = 2:n
-    data_avg = data_avg + data_array[:,i]
-end
-data_avg = data_avg./n
+  # sum all of the timeseries, there isn't a function that supports data frames
+  data_avg = data_array[:,1]
+  for i = 2:n
+      data_avg = data_avg + data_array[:,i]
+  end
+  data_avg = data_avg./n
 
-# difference the original data with the average value
-for i = 1:n
-    data_array[:,i] = data_array[:,i] - data_avg
-end
+  # difference the original data with the average value
+  for i = 1:n
+      data_array[:,i] = data_array[:,i] - data_avg
+  end
 
-return data_array, data_avg
+  return data_array, data_avg
 
 end
 
@@ -232,14 +175,55 @@ function rms_norm(ts)
 #
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-n = length(ts)
-rms = sqrt( (1/n)*(ts'*ts) )
+  n = length(ts)
+  rms = sqrt( (1/n)*(ts'*ts) )
 
-ts = ts./rms
+  ts = ts./rms
 
-return ts
+  return ts
+
+  end
+
+
+  function time_adjust(ts, dx, fs, v)
+
+    t_adj = Int(round(fs*dx/v) )
+    add_zeros = zeros( t_adj, 1) 
+    m = length(ts) 
+
+    # make sure that ts is m-by-1 
+    ts = reshape(ts, m, 1) 
+
+    ts = [add_zeros; ts] 
+    ts = ts[1:m] 
+
+    return ts, t_adj
 
 end
+
+
+function trace_stack(trace_mat, stack_window)
+
+
+  n = size(trace_mat, 2) 
+
+  if !isodd(stack_window) 
+    stack_window = stack_window + 1
+  end 
+
+  ind_start = Int( (stack_window+1)/2)
+
+  a = 1
+  b = stack_window
+
+  for i = ind_start:(n-ind_start+1)
+      trace_mat[:,i] = mapslices(mean, trace_mat[:,a:b], 2)
+      a += 1
+      b += 1
+  end
+
+  return trace_mat
+end 
 
 
 
@@ -269,26 +253,172 @@ function butt_design( filter_type, fc )
 #
 ##### -------------------------------------------------------------------- #####
 
-if filter_type == "bp"
-    responsetype = Bandpass( fc[1], fc[2] )
-elseif filter_type == "lp"
-    responsetype = Lowpass(fc)
-else
-    responsetype = Highpass(fc)
+  if filter_type == "bp"
+      responsetype = Bandpass( fc[1], fc[2] )
+  elseif filter_type == "lp"
+      responsetype = Lowpass(fc)
+  else
+      responsetype = Highpass(fc)
+  end
+
+  designmethod = Butterworth(2)
+  filter_object = digitalfilter(responsetype, designmethod)
+
+  return filter_object
+
 end
 
-designmethod = Butterworth(2)
-filter_object = digitalfilter(responsetype, designmethod)
+###############################################################
+## For the following code don't forget to acknowledge Jacob Svensson @ https://gist.github.com/jcbsv . Some code was modified
+#################################################
 
-return filter_object
+function cheby1(n, r, wp)
+# Chebyshev Type I digital filter design.
+#
+#    b, a = cheby1(n, r, wp)
+#
+# Designs an nth order lowpass digital Chebyshev filter with
+# R decibels of peak-to-peak ripple in the passband.
+#
+# The function returns the filter coefficients in length
+# n+1 vectors b (numerator) and a (denominator).
+#
+# The passband-edge frequency wp must be 0.0 < wp < 1.0, with
+# 1.0 corresponding to half the sample rate.
+#
+#  Use r=0.5 as a starting point, if you are unsure about choosing r.
+  h = digitalfilter(Lowpass(wp), Chebyshev1(n, r))
+  tf = convert(PolynomialRatio, h)
+  coefb(tf), coefa(tf)
+end
+
+
+function decimate(x, r)
+# Decimation reduces the original sampling rate of a sequence
+# to a lower rate. It is the opposite of interpolation.
+#
+# The decimate function lowpass filters the input to guard
+# against aliasing and downsamples the result.
+#
+#   y = decimate(x,r)
+#
+# Reduces the sampling rate of x, the input signal, by a factor
+# of r. The decimated vector, y, is shortened by a factor of r
+# so that length(y) = ceil(length(x)/r). By default, decimate
+# uses a lowpass Chebyshev Type I IIR filter of order 8.
+#
+# Sometimes, the specified filter order produces passband
+# distortion due to roundoff errors accumulated from the
+# convolutions needed to create the transfer function. The filter
+# order is automatically reduced when distortion causes the
+# magnitude response at the cutoff frequency to differ from the
+# ripple by more than 1E–6.
+
+  nfilt = 8
+  cutoff = .8 / r
+  rip = 0.05  # dB
+
+  function filtmag_db(b, a, f)
+    # Find filter's magnitude response in decibels at given frequency.
+    nb = length(b)
+    na = length(a)
+    top = (exp.(-1im*collect(0:nb-1)*pi*f) )'*b
+    bot = (exp.(-1im*collect(0:na-1)*pi*f) )'*a
+    20*log10(abs(top/bot))
+  end
+
+  b, a = cheby1(nfilt, rip, cutoff)
+  while all( b == 0) || ( abs( filtmag_db( b, a, cutoff )+rip )>1e-6 )
+    nfilt = nfilt - 1
+    if nfilt == 0
+        break
+    end
+    b, a = cheby1(nfilt, rip, cutoff)
+  end
+  y = filtfilt(PolynomialRatio(b, a), x)
+  nd = length(x)
+  nout = ceil(nd/r)
+  nbeg = Int(r - (r * nout - nd))
+  y[nbeg:r:nd]
+end
+
+
+##### -------------------------------------------------------------------- #####
+
+
+function boxcar3(A::AbstractArray)
+# Run a 3-by-3-by-... boxcar filter on an array. Courtesy of Tim Holy https://julialang.org/blog/2016/02/iteration
+    out = similar(A)
+    R = CartesianRange(size(A))
+    I1, Iend = first(R), last(R)
+    for I in R
+        n, s = 0, zero(eltype(out))
+        for J in CartesianRange(max(I1, I-I1), min(Iend, I+I1))
+            s += A[J]
+            n += 1
+        end
+        out[I] = s/n
+    end
+    out
+end
+
+
+##### -------------------------------------------------------------------- #####
+
+function whiten(x, freq) 
+#=
+Spectral whitening of a time series for a given frequency range 
+
+Input Variables:
+  x - black Michael Jackson 
+  freq - the corner frequencies normalized to 1 unit time sampling frequency to 
+      be whitened 
+  
+Output Variables:
+  x - white Michael Jackson
+=#
+  
+  # do a little error checking 
+  if sum(Int.(freq .> 0.5) ) != 0  
+    error("Seriously? The upper corner is beyond the Nyquist. You need to retake time series.")
+  end
+
+  if isempty(freq) 
+    freq = [0 0.5]
+  end 
+
+
+  n = length(x) 
+
+  # create the hanning window
+  W = hanning(n)
+  X = fft(W.*x) 
+
+  mag = abs.(X) 
+  mag_mlt = maximum(mag) 
+
+  phase = unwrap(angle.(X))
+  f = (collect( 0:(n-1) ) )./n 
+
+  df = abs.(f-freq[1])
+  ind1 = find( df .== minimum(df)  )[1]
+
+  df = abs.(f-freq[2])
+  ind2 = find( df .== minimum(df)  )[1]
+
+  # Normalize the magnitude across the specified band 
+  mag[ ind1:ind2 ] = mag_mlt
+
+  x = real( ifft( mag.*exp.(1im.*phase) ) )
+
+  return x 
 
 end
+
+
+
 
 
 
 ### Thats it, son!
 end
-
-
-
-\

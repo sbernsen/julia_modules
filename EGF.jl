@@ -1,9 +1,8 @@
 module EGF
 
-
 export mw_array, array_xcorr, array_xcorr_td, rms_norm
 
-using DSP
+using DSP, Preprocessing
 
 function mw_array(ts, win_len, STEP, pad)
 # Assemble an array for the tukey window where each column is a new step in the
@@ -41,14 +40,16 @@ function mw_array(ts, win_len, STEP, pad)
     n = length(a)
     mw_array = zeros(win_len, n)
 
-    # Pad with zeros if needed
-    if pad == true
-        mw_array = zeros(2*win_len, n)
-    end
 
     for i in 1:n
         mw_array[1:win_len, i] = ts[ a[i]:b[i] ].*win
     end
+
+    # Pad with zeros if needed
+    if pad == true
+        mw_array = [ zeros(size(mw_array)); mw_array]
+    end
+
 
     return mw_array
 
@@ -62,25 +63,40 @@ function array_xcorr(arr1, arr2)
 #   arr1, arr2 - padded arrays of equal dimensions to be cross correlated
 #
 # Output Variables:
-#   arr_xc - the cross correlation of equal dimensions the input arrays
+#   xcf - the cross correlation of equal dimensions the input arrays
 #
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    M = size(arr1, 1) 
+
+    if Bool(mod(M,2))
+        m = Int( (M-1)/2 )
+    else 
+        m = Int( M/2 )
+    end
 
     # Compute the FFT on each column
     arr1 = mapslices(fft, arr1, 1)
     arr2 = mapslices(fft, arr2, 1)
 
     # Compute the dot product
-    fft_arr = arr1.*conj(arr2)
+    fft_causal = arr1.*conj(arr2)
+    fft_acausal = arr2.*conj(arr1) 
 
     # Get the inverse FFT
-    arr_xc = real( mapslices( ifft, fft_arr, 1) )
+    arr_c = real( mapslices( ifft, fft_causal, 1) )
+    arr_a = real( mapslices( ifft, fft_acausal, 1) )
+
 
     # normalize by rms
-    arr_xc = mapslices( rms_norm, arr_xc, 1)
+    arr_c = mapslices( rms_norm, arr_c, 1)
+    arr_a = mapslices( rms_norm, arr_a, 1)
 
     # Stack
-    xcf = mapslices(mean, arr_xc, 2)
+    arr_c = ( mapslices(mean, arr_c, 2) )[1:m]
+    arr_a = ( mapslices(mean, arr_a, 2) )[m:-1:1]
+
+    xcf = [arr_a; arr_c]
 
     return xcf
 
@@ -105,17 +121,13 @@ function array_xcorr_td(ts1, ts2)
         xcf = zeros(2m-1, 1)
 
         for i in 1:n
-            xcf = xcf + rms_norm( xcorr(ts2[:,i], ts1[:,i] ) )
+            xcf = xcf + crosscor(ts2[:], ts1[:], collect(-m:m); demean = true)
         end
 
         xcf = xcf./n
 
     else
-        # Remove the standard deviation
-        ts1 = rms_norm(ts1)
-        ts2 = rms_norm(ts2)
-
-        xcf = xcorr(ts2[:], ts1[:])
+        xcf = crosscor(ts2[:], ts1[:], collect(-m:m); demean = true)
     end
 
 
@@ -127,6 +139,7 @@ end
 ################################################################################
 ################################# IO Functions #################################
 ################################################################################
+
 
 
 function matrix2SAC(data_arr, sta_list)
