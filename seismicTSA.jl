@@ -1,7 +1,10 @@
+module seismicTSA
+
 
 # Compute some common time series analysis on seismic data
 using DSP
 
+export psdpdf
 
 function psdpdf(ts, window, overlap, fs, ACF)
 
@@ -54,5 +57,7 @@ function psdpdf(ts, window, overlap, fs, ACF)
 
 
     return freqs, median_psd, std_psd
+
+end
 
 end
